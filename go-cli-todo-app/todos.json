@@ -10,5 +10,17 @@
         "Completed": true,
         "CreatedAt": "2024-11-26T15:26:37.361324-05:00",
         "CompletedAt": "2024-11-26T15:33:03.088908-05:00"
+    },
+    {
+        "Title": "Walk my dog",
+        "Completed": false,
+        "CreatedAt": "2024-11-27T17:44:04.963474-05:00",
+        "CompletedAt": null
+    },
+    {
+        "Title": "Go hiking later with ashley",
+        "Completed": false,
+        "CreatedAt": "2024-11-27T17:51:01.667686-05:00",
+        "CompletedAt": null
     }
 ]
