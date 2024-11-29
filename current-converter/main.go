@@ -33,17 +33,29 @@ func main() {
 	}
 
 	// Run TUI
-	conversionParams, err := tui.RunTUI(rates)
+	conversionParams, err := tui.RunTUI()
 	if err != nil {
 		fmt.Println("Error:", err)
 		return
 	}
 
 	// Perform conversion
+	rateFrom, ok := rates.Rates[conversionParams.CurrencyFrom]
+	if !ok {
+		fmt.Printf("Error: Unsupported currency %s\n", conversionParams.CurrencyFrom)
+		return
+	}
+
+	rateTo, ok := rates.Rates[conversionParams.CurrencyTo]
+	if !ok {
+		fmt.Printf("Error: Unsupported currency %s\n", conversionParams.CurrencyTo)
+		return
+	}
+
 	convertedValue := conversion.Convert(
 		conversionParams.Amount,
-		rates.Rates[conversionParams.CurrencyFrom],
-		rates.Rates[conversionParams.CurrencyTo],
+		rateFrom,
+		rateTo,
 	)
 
 	// Display the result

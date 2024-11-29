@@ -3,107 +3,215 @@ package tui
 import (
 	"fmt"
 	"strconv"
+	"strings"
+	"unicode"
 
-	"cloudprojects/current-converter/api"
+	// "cloudprojects/current-converter/api"
+	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbletea"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
-type model struct {
-	inputs      []textinput.Model
-	focused     int
-	currencyMap map[string]bool
-	done        bool
-	err         error
-}
-
+// ConversionParams represents the conversion details entered by the user.
 type ConversionParams struct {
 	Amount       float64
 	CurrencyFrom string
 	CurrencyTo   string
 }
 
-func (m model) Init() tea.Cmd {
-	return textinput.Blink
+// Item represents a currency option.
+type Item struct {
+	Code string
+	Name string
 }
 
-func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (i Item) Title() string       { return fmt.Sprintf("%s %s", currencySymbol(i.Code), i.Code) }
+func (i Item) Description() string { return i.Name }
+func (i Item) FilterValue() string { return i.Code }
+
+func currencySymbol(code string) string {
+	switch code {
+	case "USD":
+		return "$"
+	case "GBP":
+		return "£"
+	case "EUR":
+		return "€"
+	case "JPY":
+		return "¥"
+	default:
+		return ""
+	}
+}
+
+type model struct {
+	stage         int // Tracks the current question (0: base currency, 1: target currency, 2: amount)
+	list          list.Model
+	textInput     textinput.Model
+	currencyFrom  string
+	currencyTo    string
+	amount        float64
+	isCustomInput bool // Tracks whether the user is entering a custom currency
+	finished      bool
+	err           error
+}
+
+// Styling variables
+var (
+	questionStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#A020F0")).Bold(true)
+	highlightStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#00FF00")).Bold(true)
+	cursorStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF69B4"))
+	unselectedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF"))
+)
+
+func (m *model) Init() tea.Cmd {
+	return nil
+}
+
+func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		switch msg.String() {
+		key := msg.String()
+		switch key {
 		case "enter":
-			if m.focused < len(m.inputs)-1 {
-				m.focused++
-				cmd := m.inputs[m.focused].Focus()
-				m.inputs[m.focused-1].Blur()
-				return m, cmd
+			if m.isCustomInput {
+				// Handle custom currency input
+				input := strings.ToUpper(strings.TrimSpace(m.textInput.Value()))
+				if !isAlphabetic(input) || len(input) != 3 {
+					m.err = fmt.Errorf("invalid currency code: must be 3 letters")
+					return m, nil
+				}
+				if m.stage == 0 {
+					m.currencyFrom = input
+					m.isCustomInput = false
+					m.textInput.Reset()
+					m.stage++
+					m.list.ResetSelected()
+					return m, nil
+				} else if m.stage == 1 {
+					m.currencyTo = input
+					m.isCustomInput = false
+					m.textInput.Reset()
+					m.stage++
+					m.textInput.Placeholder = "Enter amount (e.g., 100)"
+					m.textInput.Focus()
+					return m, nil
+				}
+			} else if m.stage == 2 {
+				// Handle amount input
+				amountStr := strings.TrimSpace(m.textInput.Value())
+				amount, err := strconv.ParseFloat(amountStr, 64)
+				if err != nil {
+					m.err = fmt.Errorf("invalid amount: %v", err)
+					return m, nil
+				}
+				m.amount = amount
+				m.finished = true
+				return m, tea.Quit
+			} else {
+				// Handle list selection
+				selectedItem := m.list.SelectedItem().(Item)
+				if selectedItem.Code == "OTHER" {
+					m.isCustomInput = true
+					m.textInput.Placeholder = "Enter currency code (e.g., USD)"
+					m.textInput.Focus()
+					return m, textinput.Blink
+				}
+				if m.stage == 0 {
+					m.currencyFrom = selectedItem.Code
+					m.stage++
+					m.list.ResetSelected()
+					return m, nil
+				} else if m.stage == 1 {
+					m.currencyTo = selectedItem.Code
+					m.stage++
+					m.textInput.Placeholder = "Enter amount (e.g., 100)"
+					m.textInput.Focus()
+					return m, nil
+				}
 			}
-
-			// Validate inputs
-			_, err := strconv.ParseFloat(m.inputs[0].Value(), 64)
-			if err != nil {
-				m.err = fmt.Errorf("invalid amount: %v", err)
-				return m, nil
-			}
-
-			if !m.currencyMap[m.inputs[1].Value()] || !m.currencyMap[m.inputs[2].Value()] {
-				m.err = fmt.Errorf("unsupported currency")
-				return m, nil
-			}
-
-			m.done = true
-			return m, tea.Quit
 		case "ctrl+c", "esc":
 			return m, tea.Quit
 		}
 	}
 
-	var cmd tea.Cmd
-	m.inputs[m.focused], cmd = m.inputs[m.focused].Update(msg)
-	return m, cmd
+	// Handle text input for custom currency or amount input
+	if m.isCustomInput || m.stage == 2 {
+		m.textInput, cmd = m.textInput.Update(msg)
+		return m, cmd
+	}
+
+	// Handle list updates for currency selection
+	if m.stage == 0 || m.stage == 1 {
+		m.list, cmd = m.list.Update(msg)
+		return m, cmd
+	}
+
+	return m, nil
 }
 
 func (m model) View() string {
 	if m.err != nil {
-		return fmt.Sprintf("Error: %v\n\nPress any key to exit.\n", m.err)
+		return fmt.Sprintf("Error: %v\n\nPress any key to continue.\n", m.err)
 	}
 
-	if m.done {
-		return "Processing...\n"
+	if m.finished {
+		// Return an empty string when finished to avoid redundant output.
+		return ""
 	}
 
-	var output string
-	for i, input := range m.inputs {
-		if i == m.focused {
-			output += fmt.Sprintf("• %s\n", input.View())
-		} else {
-			output += fmt.Sprintf("  %s\n", input.View())
+	switch m.stage {
+	case 0:
+		if m.isCustomInput {
+			return questionStyle.Render("Enter your custom base currency code (e.g., USD):\n\n") + m.textInput.View()
 		}
+		return questionStyle.Render("What is your base currency?\n\n") + m.list.View()
+	case 1:
+		if m.isCustomInput {
+			return questionStyle.Render("Enter your custom target currency code (e.g., EUR):\n\n") + m.textInput.View()
+		}
+		return questionStyle.Render("What do you want to convert to?\n\n") + m.list.View()
+	case 2:
+		return questionStyle.Render("How much to convert?\n\n") + m.textInput.View()
+	default:
+		return ""
 	}
-	output += "\nPress Enter to submit, or Ctrl+C to exit.\n"
-	return output
 }
 
-func RunTUI(rates api.CurrencyData) (ConversionParams, error) {
-	currencyMap := make(map[string]bool)
-	for currency := range rates.Rates {
-		currencyMap[currency] = true
+func RunTUI() (ConversionParams, error) {
+	currencyList := []list.Item{
+		Item{Code: "USD", Name: "United States Dollar"},
+		Item{Code: "GBP", Name: "British Pound"},
+		Item{Code: "EUR", Name: "Euro"},
+		Item{Code: "JPY", Name: "Japanese Yen"},
+		Item{Code: "OTHER", Name: "Type a custom currency"},
 	}
 
-	inputs := make([]textinput.Model, 3)
-	for i := range inputs {
-		inputs[i] = textinput.New()
-	}
+	// Create the list model
+	delegate := list.NewDefaultDelegate()
+	delegate.Styles.SelectedTitle = highlightStyle
+	delegate.Styles.NormalTitle = unselectedStyle
+	delegate.Styles.SelectedDesc = highlightStyle
+	delegate.Styles.NormalDesc = unselectedStyle
 
-	inputs[0].Placeholder = "Amount (e.g., 100)"
-	inputs[1].Placeholder = "From Currency (e.g., USD)"
-	inputs[2].Placeholder = "To Currency (e.g., EUR)"
-	inputs[0].Focus()
+	listModel := list.New(currencyList, delegate, 30, 10)
+	listModel.SetShowStatusBar(false)
+	listModel.SetFilteringEnabled(false)
+	listModel.DisableQuitKeybindings()
+	listModel.SetShowHelp(false)
 
-	initialModel := model{
-		inputs:      inputs,
-		focused:     0,
-		currencyMap: currencyMap,
+	// Text input for custom currency and amount
+	textInput := textinput.New()
+	textInput.CursorStyle = cursorStyle
+
+	// Initialize the TUI model
+	initialModel := &model{
+		stage:     0,
+		list:      listModel,
+		textInput: textInput,
 	}
 
 	p := tea.NewProgram(initialModel)
@@ -112,15 +220,24 @@ func RunTUI(rates api.CurrencyData) (ConversionParams, error) {
 		return ConversionParams{}, fmt.Errorf("error running TUI: %v", err)
 	}
 
-	fm := finalModel.(model)
-	amount, err := strconv.ParseFloat(fm.inputs[0].Value(), 64)
-	if err != nil {
-		return ConversionParams{}, fmt.Errorf("invalid amount input")
+	fm := finalModel.(*model)
+
+	if fm.err != nil {
+		return ConversionParams{}, fm.err
 	}
 
 	return ConversionParams{
-		Amount:       amount,
-		CurrencyFrom: fm.inputs[1].Value(),
-		CurrencyTo:   fm.inputs[2].Value(),
+		Amount:       fm.amount,
+		CurrencyFrom: fm.currencyFrom,
+		CurrencyTo:   fm.currencyTo,
 	}, nil
+}
+
+func isAlphabetic(input string) bool {
+	for _, r := range input {
+		if !unicode.IsLetter(r) {
+			return false
+		}
+	}
+	return true
 }
