@@ -1,4 +1,4 @@
-# 05 - Currency Converter
+# Currency Converter
 
 The goal of this project is to create a currency converter TUI application.
 
