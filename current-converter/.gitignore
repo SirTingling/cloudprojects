@@ -1,1 +1,26 @@
+# Ignore .env file containing API keys and sensitive information
 .env
+
+# Ignore credentials or sensitive files
+*.creds
+*.key
+*.pem
+
+# Ignore system-specific files
+.DS_Store
+
+# Ignore build and temporary files
+bin/
+*.exe
+*.log
+*.tmp
+
+# Ignore Go modules cache
+/go/
+
+# Ignore compiled binary files
+current-converter
+
+# Ignore IDE/project-specific files
+.vscode/
+.idea/
